@@ -3,8 +3,8 @@
 require 'spec_helper'
 
 RSpec.describe GrapeSwagger::Rake::OapiTasks do
-  let(:api) do
-    item = Class.new(Grape::API) do
+  module Api
+    class Item < Grape::API
       version 'v1', using: :path
 
       namespace :item do
@@ -16,19 +16,32 @@ RSpec.describe GrapeSwagger::Rake::OapiTasks do
       end
     end
 
-    Class.new(Grape::API) do
+    class Base < Grape::API
       prefix :api
-      mount item
+      mount Api::Item
       add_swagger_documentation add_version: true
     end
   end
 
-  subject { described_class.new(api) }
+  subject { described_class.new(Api::Base) }
+
+  let(:api_class) { subject.send(:api_class) }
+  let(:docs_url) { subject.send(:urls_for, api_class).first }
+
+  describe '.new' do
+    it 'accepts class name as a constant' do
+      expect(described_class.new(::Api::Base).send(:api_class)).to eq(Api::Base)
+    end
+
+    it 'accepts class name as a string' do
+      expect(described_class.new('::Api::Base').send(:api_class)).to eq(Api::Base)
+    end
+  end
 
   describe '#make_request' do
     describe 'complete documentation' do
       before do
-        subject.send(:make_request)
+        subject.send(:make_request, docs_url)
       end
 
       describe 'not storing' do
@@ -41,7 +54,7 @@ RSpec.describe GrapeSwagger::Rake::OapiTasks do
         end
 
         it 'requests doc url' do
-          expect(subject.send(:url_for)).to eql '/api/swagger_doc'
+          expect(docs_url).to eql '/api/swagger_doc'
         end
       end
 
@@ -58,10 +71,14 @@ RSpec.describe GrapeSwagger::Rake::OapiTasks do
     describe 'documentation for resource' do
       before do
         ENV['resource'] = resource
-        subject.send(:make_request)
+        subject.send(:make_request, docs_url)
       end
 
-      let(:response) { JSON.parse(subject.send(:make_request)) }
+      let(:response) do
+        JSON.parse(
+          subject.send(:make_request, docs_url)
+        )
+      end
 
       after { ENV.delete('resource') }
 
@@ -73,7 +90,7 @@ RSpec.describe GrapeSwagger::Rake::OapiTasks do
         end
 
         it 'requests doc url' do
-          expect(subject.send(:url_for)).to eql "/api/swagger_doc/#{resource}"
+          expect(docs_url).to eql "/api/swagger_doc/#{resource}"
         end
 
         it 'has only one resource path' do
@@ -105,7 +122,7 @@ RSpec.describe GrapeSwagger::Rake::OapiTasks do
 
     describe 'call it' do
       before do
-        subject.send(:make_request)
+        subject.send(:make_request, docs_url)
       end
       specify do
         expect(subject).to respond_to :oapi
@@ -118,7 +135,7 @@ RSpec.describe GrapeSwagger::Rake::OapiTasks do
   describe '#file' do
     describe 'no store given' do
       it 'returns swagger_doc.json' do
-        expect(subject.send(:file)).to end_with 'swagger_doc.json'
+        expect(subject.send(:file, docs_url)).to end_with 'swagger_doc.json'
       end
     end
 
@@ -129,7 +146,7 @@ RSpec.describe GrapeSwagger::Rake::OapiTasks do
         before { ENV['store'] = 'true' }
 
         it 'returns swagger_doc.json' do
-          expect(subject.send(:file)).to end_with 'swagger_doc.json'
+          expect(subject.send(:file, docs_url)).to end_with 'swagger_doc.json'
         end
       end
 
@@ -138,7 +155,7 @@ RSpec.describe GrapeSwagger::Rake::OapiTasks do
         before { ENV['store'] = name }
 
         it 'returns swagger_doc.json' do
-          expect(subject.send(:file)).to end_with name
+          expect(subject.send(:file, docs_url)).to include(name.split('.')[0])
         end
       end
     end

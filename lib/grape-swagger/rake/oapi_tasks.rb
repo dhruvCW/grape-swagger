@@ -10,16 +10,24 @@ module GrapeSwagger
       include Rack::Test::Methods
 
       attr_reader :oapi
-      attr_reader :api_class
 
       def initialize(api_class)
         super()
 
-        @api_class = api_class
+        if api_class.is_a? String
+          @api_class_name = api_class
+        else
+          @api_class = api_class
+        end
+
         define_tasks
       end
 
       private
+
+      def api_class
+        @api_class ||= @api_class_name.constantize
+      end
 
       def define_tasks
         namespace :oapi do
@@ -38,9 +46,12 @@ module GrapeSwagger
           resource - if given only for that it would be generated (optional)'
         task fetch: :environment do
           # :nocov:
-          make_request
+          urls_for(api_class).each do |url|
+            make_request(url)
 
-          save_to_file? ? File.write(file, @oapi) : $stdout.print(@oapi)
+            save_to_file? ? File.write(file(url), @oapi) : $stdout.print(@oapi)
+          end
+
           # :nocov:
         end
       end
@@ -56,32 +67,44 @@ module GrapeSwagger
           ::Rake::Task['oapi:fetch'].invoke
           exit if error?
 
-          output = system "swagger validate #{file}"
+          urls_for(api_class).each do |url|
+            @output = system "swagger-cli validate #{file(url)}"
 
-          $stdout.puts 'install swagger-cli with `npm install swagger-cli -g`' if output.nil?
-          FileUtils.rm(file)
+            FileUtils.rm(
+              file(url)
+            )
+          end
+
+          $stdout.puts 'install swagger-cli with `npm install swagger-cli -g`' if @output.nil?
           # :nocov:
         end
       end
 
       # helper methods
       #
-      def make_request
-        get url_for
+      # rubocop:disable Style/StringConcatenation
+      def make_request(url)
+        get url
 
         @oapi = JSON.pretty_generate(
-          JSON.parse(
-            last_response.body, symolize_names: true
-          )
+          JSON.parse(last_response.body, symolize_names: true)
         ) + "\n"
       end
+      # rubocop:enable Style/StringConcatenation
 
-      def url_for
-        oapi_route = api_class.routes[-2]
-        path = oapi_route.path.sub(/\(\.\w+\)$/, '').sub(/\(\.:\w+\)$/, '')
-        path.sub!(':version', oapi_route.version.to_s)
+      def urls_for(api_class)
+        api_class.routes
+                 .map(&:path)
+                 .select { |e| e.include?('doc') }
+                 .reject { |e| e.include?(':name') }
+                 .map { |e| format_path(e) }
+                 .map { |e| [e, ENV.fetch('resource', nil)].join('/').chomp('/') }
+      end
 
-        [path, ENV['resource']].join('/').chomp('/')
+      def format_path(path)
+        oapi_route = api_class.routes.select { |e| e.path == path }.first
+        path = path.sub(/\(\.\w+\)$/, '').sub(/\(\.:\w+\)$/, '')
+        path.sub(':version', oapi_route.version.to_s)
       end
 
       def save_to_file?
@@ -92,8 +115,15 @@ module GrapeSwagger
         JSON.parse(@oapi).keys.first == 'error'
       end
 
-      def file
-        name = ENV['store'] == 'true' || ENV['store'].blank? ? 'swagger_doc.json' : ENV['store']
+      def file(url)
+        api_version = url.split('/').last
+
+        name = if ENV['store'] == 'true' || ENV['store'].blank?
+                 "swagger_doc_#{api_version}.json"
+               else
+                 ENV['store'].sub('.json', "_#{api_version}.json")
+               end
+
         File.join(Dir.getwd, name)
       end
 

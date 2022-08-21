@@ -43,14 +43,16 @@ This screenshot is based on the [Hussars](https://github.com/LeFnord/hussars) sa
 
 The following versions of grape, grape-entity and grape-swagger can currently be used together.
 
-grape-swagger | swagger spec | grape                   | grape-entity | representable |
---------------|--------------|-------------------------|--------------|---------------|
-0.10.5        |     1.2      | >= 0.10.0 ... <= 0.14.0 |  < 0.5.0     | n/a           |
-0.11.0        |     1.2      |               >= 0.16.2 |  < 0.5.0     | n/a           |
-0.25.2        |     2.0      | >= 0.14.0 ... <= 0.18.0 | <= 0.6.0     | >= 2.4.1      |
-0.26.0        |     2.0      | >= 0.16.2     <= 1.1.0  | <= 0.6.1     | >= 2.4.1      |
-0.27.0        |     2.0      | >= 0.16.2 ... <= 1.1.0  | >= 0.5.0     | >= 2.4.1      |
-0.32.0        |     2.0      | >= 0.16.2               | >= 0.5.0     | >= 2.4.1      |
+| grape-swagger | swagger spec | grape                   | grape-entity | representable |
+| ------------- | ------------ | ----------------------- | ------------ | ------------- |
+| 0.10.5        | 1.2          | >= 0.10.0 ... <= 0.14.0 | < 0.5.0      | n/a           |
+| 0.11.0        | 1.2          | >= 0.16.2               | < 0.5.0      | n/a           |
+| 0.25.2        | 2.0          | >= 0.14.0 ... <= 0.18.0 | <= 0.6.0     | >= 2.4.1      |
+| 0.26.0        | 2.0          | >= 0.16.2 ... <= 1.1.0  | <= 0.6.1     | >= 2.4.1      |
+| 0.27.0        | 2.0          | >= 0.16.2 ... <= 1.1.0  | >= 0.5.0     | >= 2.4.1      |
+| 0.32.0        | 2.0          | >= 0.16.2               | >= 0.5.0     | >= 2.4.1      |
+| 0.34.0        | 2.0          | >= 0.16.2 ... < 1.3.0   | >= 0.5.0     | >= 2.4.1      |
+| >= 1.0.0      | 2.0          | >= 1.3.0                | >= 0.5.0     | >= 2.4.1      |
 
 
 ## Swagger-Spec <a name="swagger-spec"></a>
@@ -104,9 +106,9 @@ Also added support for [representable](https://github.com/apotonick/representabl
 
 ```ruby
 # For Grape::Entity ( https://github.com/ruby-grape/grape-entity )
-gem 'grape-swagger-entity'
+gem 'grape-swagger-entity', '~> 0.3'
 # For representable ( https://github.com/apotonick/representable )
-gem 'grape-swagger-representable'
+gem 'grape-swagger-representable', '~> 0.2'
 ```
 
 If you are not using Rails, make sure to load the parser inside your application initialization logic, e.g., via `require 'grape-swagger/entity'` or `require 'grape-swagger/representable'`.
@@ -189,6 +191,7 @@ end
 * [base_path](#base_path)
 * [mount_path](#mount_path)
 * [add_base_path](#add_base_path)
+* [add_root](#add_root)
 * [add_version](#add_version)
 * [doc_version](#doc_version)
 * [endpoint_auth_wrapper](#endpoint_auth_wrapper)
@@ -246,6 +249,13 @@ Add `basePath` key to the documented path keys, default is: `false`.
 ```ruby
 add_swagger_documentation \
    add_base_path: true # only if base_path given
+```
+
+#### add_root: <a name="add_root"></a>
+Add root element to all the responses, default is: `false`.
+```ruby
+add_swagger_documentation \
+   add_root: true
 ```
 
 #### add_version: <a name="add_version"></a>
@@ -441,12 +451,16 @@ add_swagger_documentation \
 * [Collection Format](#collection-format)
 * [Hiding parameters](#hiding-parameters)
 * [Setting a Swagger default value](#default-value)
+* [Setting `additionalProperties` for `object`-type parameters](#additional-properties)
+* [Example parameter value](#param-example)
 * [Response documentation](#response)
 * [Changing default status codes](#change-status)
 * [File response](#file-response)
 * [Extensions](#extensions)
 * [Response examples documentation](#response-examples)
 * [Response headers documentation](#response-headers)
+* [Adding root element to responses](#response-root)
+* [Multiple present Response](#multiple-response)
 
 #### Swagger Header Parameters  <a name="headers"></a>
 
@@ -733,9 +747,12 @@ end
 Exclude single optional parameter from the documentation
 
 ```ruby
+not_admins = lambda { |token_owner = nil| token_owner.nil? || !token_owner.admin? }
+
 params do
   optional :one, documentation: { hidden: true }
-  optional :two, documentation: { hidden: -> { true } }
+  optional :two, documentation: { hidden: -> { |t=nil| true } }
+  optional :three, documentation: { hidden: not_admins }
 end
 post :act do
   ...
@@ -754,8 +771,6 @@ params do
 end
 ```
 
-The example parameter will populate the Swagger UI with the example value, and can be used for optional or required parameters.
-
 Grape uses the option `default` to set a default value for optional parameters. This is different in that Grape will set your parameter to the provided default if the parameter is omitted, whereas the example value above will only set the value in the UI itself. This will set the Swagger `defaultValue` to the provided value. Note that the example value will override the Grape default value.
 
 ```ruby
@@ -765,6 +780,46 @@ params do
 end
 ```
 
+### Setting `additionalProperties` for `object`-type parameters <a name="additional-properties">
+
+Use the `additional_properties` option in the `documentation` hash for `object`-type parameters to set [`additionalProperties`](https://swagger.io/specification/v2/#model-with-mapdictionary-properties).
+
+#### Allow any additional properties
+```ruby
+params do
+  optional :thing, type: Hash, documentation: { additional_properties: true }
+end
+```
+
+#### Allow any additional properties of a particular type
+```ruby
+params do
+  optional :thing, type: Hash, documentation: { additional_properties: String }
+end
+```
+
+#### Allow any additional properties matching a defined schema
+```ruby
+class Entity < Grape::Entity
+  expose :this
+end
+
+params do
+  optional :thing, type: Hash, documentation: { additional_properties: Entity }
+end
+```
+
+
+#### Example parameter value <a name="param-example"></a>
+
+The example parameter will populate the Swagger UI with the example value, and can be used for optional or required parameters.
+
+```ruby
+params do
+  requires :id, type: Integer, documentation: { example: 123 }
+  optional :name, type: String, documentation: { example: 'Buddy Guy' }
+end
+```
 
 #### Expose nested namespace as standalone route
 
@@ -788,7 +843,7 @@ namespace 'store/order', desc: 'Order operations within a store', swagger: { nes
   get :order_id do
   	...
   end
-  namespace 'actions', desc: 'Order actions' do, nested: false
+  namespace 'actions', desc: 'Order actions', nested: false do
     get 'evaluate' do
       ...
     end
@@ -845,10 +900,11 @@ get '/thing', failure: [
 end
 ```
 
-By adding a `model` key, e.g. this would be taken.
+By adding a `model` key, e.g. this would be taken. Setting an empty string will act like an empty body.
 ```ruby
 get '/thing', failure: [
   { code: 400, message: 'General error' },
+  { code: 403, message: 'Forbidden error', model: '' },
   { code: 422, message: 'Invalid parameter entry', model: Entities::ApiError }
 ] do
   # ...
@@ -913,7 +969,7 @@ desc 'Attach a field to an entity through a PUT',
     failure: [
       { code: 400, message: 'Bad request' },
       { code: 404, message: 'Not found' }
-    ]  
+    ]
 put do
   # your code comes here
 end
@@ -1070,6 +1126,20 @@ or, for more definitions:
 route_setting :x_def, [{ for: 422, other: 'stuff' }, { for: 200, some: 'stuff' }]
 ```
 
+- `params` extension, add a `x` key to the `documentation` hash :
+```ruby
+requires :foo, type: String, documentation: { x: { some: 'stuff' } }
+```
+this would generate:
+```json
+{
+  "in": "formData",
+  "name": "foo",
+  "type": "string",
+  "required": true,
+  "x-some": "stuff"
+}
+```
 
 #### Response examples documentation <a name="response-examples"></a>
 
@@ -1179,6 +1249,130 @@ The result will look like following:
 ```
 
 Failure information can be passed as an array of arrays or an array of hashes.
+
+#### Adding root element to responses <a name="response-root"></a>
+
+You can specify a custom root element for a successful response:
+
+```ruby
+route_setting :swagger, root: 'cute_kitten'
+desc 'Get a kitten' do
+  http_codes [{ code: 200, model: Entities::Kitten }]
+end
+get '/kittens/:id' do
+end
+```
+
+The result will look like following:
+
+```json
+  "responses": {
+    "200": {
+      "description": "Get a kitten",
+      "schema": {
+        "type": "object",
+        "properties": { "cute_kitten": { "$ref": "#/definitions/Kitten" } }
+      }
+    }
+  }
+```
+
+If you specify `true`, the value of the root element will be deduced based on the model name.
+E.g. in the following example the root element will be "kittens":
+
+```ruby
+route_setting :swagger, root: true
+desc 'Get kittens' do
+  is_array true
+  http_codes [{ code: 200, model: Entities::Kitten }]
+end
+get '/kittens' do
+end
+```
+
+The result will look like following:
+
+```json
+  "responses": {
+    "200": {
+      "description": "Get kittens",
+      "schema": {
+        "type": "object",
+        "properties": { "type": "array", "items": { "kittens": { "$ref": "#/definitions/Kitten" } } }
+      }
+    }
+  }
+```
+#### Multiple present Response <a name="multiple-response"></a>
+
+You can specify a custom multiple response by using the `as` key:
+```ruby
+desc 'Multiple response',
+  success: [
+    { model: Entities::EnumValues, as: :gender },
+    { model: Entities::Something, as: :somethings }
+  ]
+end
+
+get '/things' do
+  ...
+end
+```
+The result will look like following:
+```json
+  "responses": {
+    "200": {
+      "description": "Multiple response",
+      "schema":{
+        "type":"object",
+        "properties":{
+          "gender":{
+            "$ref":"#/definitions/EnumValues"
+          },
+          "somethings":{
+            "$ref":"#/definitions/Something"
+          }
+        }
+      }
+    }
+  }
+```
+You can also specify if the response is an array, with the `is_array` key:
+```ruby
+desc 'Multiple response with array',
+  success: [
+    { model: Entities::EnumValues, as: :gender },
+    { model: Entities::Something, as: :somethings, is_array: true, required: true }
+  ]
+end
+
+get '/things' do
+  ...
+end
+```
+The result will look like following:
+```json
+  "responses": {
+    "200": {
+      "description": "Multiple response with array",
+      "schema":{
+        "type":"object",
+        "properties":{
+          "gender":{
+            "$ref":"#/definitions/EnumValues"
+          },
+          "somethings":{
+            "type":"array",
+            "items":{
+                "$ref":"#/definitions/Something"
+            }
+          }
+        },
+        "required": ["somethings"]
+      }
+    }
+  }
+```
 
 ## Using Grape Entities <a name="grape-entity"></a>
 
@@ -1299,6 +1493,94 @@ module API
 end
 ```
 
+#### Inheritance with allOf and discriminator
+```ruby
+module Entities
+  class Pet < Grape::Entity
+    expose :type, documentation: {
+      type: 'string',
+      is_discriminator: true,
+      required: true
+    }
+    expose :name, documentation: {
+      type: 'string',
+      required: true
+    }
+  end
+
+  class Cat < Pet
+    expose :huntingSkill, documentation: {
+      type: 'string',
+      description: 'The measured skill for hunting',
+      default: 'lazy',
+      values: %w[
+        clueless
+        lazy
+        adventurous
+        aggressive
+      ]
+    }
+  end
+end
+```
+
+Should generate this definitions:
+```json
+{
+  "definitions": {
+    "Pet": {
+      "type": "object",
+      "discriminator": "petType",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "petType": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "petType"
+      ]
+    },
+    "Cat": {
+      "description": "A representation of a cat",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Pet"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "huntingSkill": {
+              "type": "string",
+              "description": "The measured skill for hunting",
+              "default": "lazy",
+              "enum": [
+                "clueless",
+                "lazy",
+                "adventurous",
+                "aggressive"
+              ]
+            },
+            "petType": {
+              "type": "string",
+              "enum": ["Cat"]
+            }
+          },
+          "required": [
+            "huntingSkill",
+            "petType"
+          ]
+        }
+      ]
+    }
+  }
+}
+```
+
+
 
 
 ## Securing the Swagger UI <a name="oauth"></a>
@@ -1418,11 +1700,17 @@ end
 
 ## Rake Tasks <a name="rake"></a>
 
-Add these lines to your Rakefile, and initialize the Task class with your Api class – be sure your Api class is available.
+Add these lines to your Rakefile, and initialize the Task class with your Api class.
 
 ```ruby
 require 'grape-swagger/rake/oapi_tasks'
 GrapeSwagger::Rake::OapiTasks.new(::Api::Base)
+```
+
+You may initialize with the class name as a string if the class is not yet loaded at the time Rakefile is parsed:
+```ruby
+require 'grape-swagger/rake/oapi_tasks'
+GrapeSwagger::Rake::OapiTasks.new('::Api::Base')
 ```
 
 #### OpenApi/Swagger Documentation
@@ -1430,9 +1718,10 @@ GrapeSwagger::Rake::OapiTasks.new(::Api::Base)
 ```
 rake oapi:fetch
 params:
-- store={ true | file_name } – save as JSON (optional)
+- store={ true | file_name.json } – save as JSON (optional)
 - resource=resource_name     – get only for this one (optional)
 ```
+For mutliversion API it creates several files with following naming: file_name_`API_VERSION`.json      
 
 #### OpenApi/Swagger Validation
 

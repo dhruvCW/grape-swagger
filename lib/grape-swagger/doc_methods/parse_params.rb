@@ -25,6 +25,9 @@ module GrapeSwagger
           document_default_value(settings) unless value_type[:is_array]
           document_range_values(settings) unless value_type[:is_array]
           document_required(settings)
+          document_additional_properties(definitions, settings) unless value_type[:is_array]
+          document_add_extensions(settings)
+          document_example(settings)
 
           @parsed_param
         end
@@ -48,7 +51,7 @@ module GrapeSwagger
         end
 
         def document_default_value(settings)
-          @parsed_param[:default] = settings[:default] if settings[:default].present?
+          @parsed_param[:default] = settings[:default] if settings.key?(:default)
         end
 
         def document_type_and_format(settings, data_type)
@@ -61,6 +64,10 @@ module GrapeSwagger
           @parsed_param[:format] = settings[:format] if settings[:format].present?
         end
 
+        def document_add_extensions(settings)
+          GrapeSwagger::DocMethods::Extensions.add_extensions_to_root(settings, @parsed_param)
+        end
+
         def document_array_param(value_type, definitions)
           if value_type[:documentation].present?
             param_type = value_type[:documentation][:param_type]
@@ -71,6 +78,19 @@ module GrapeSwagger
 
           param_type ||= value_type[:param_type]
 
+          array_items = parse_array_item(
+            definitions,
+            type,
+            value_type
+          )
+
+          @parsed_param[:in] = param_type || 'formData'
+          @parsed_param[:items] = array_items
+          @parsed_param[:type] = 'array'
+          @parsed_param[:collectionFormat] = collection_format if DataType.collections.include?(collection_format)
+        end
+
+        def parse_array_item(definitions, type, value_type)
           array_items = {}
           if definitions[value_type[:data_type]]
             array_items['$ref'] = "#/definitions/#{@parsed_param[:type]}"
@@ -85,10 +105,43 @@ module GrapeSwagger
 
           array_items[:default] = value_type[:default] if value_type[:default].present?
 
-          @parsed_param[:in] = param_type || 'formData'
-          @parsed_param[:items] = array_items
-          @parsed_param[:type] = 'array'
-          @parsed_param[:collectionFormat] = collection_format if DataType.collections.include?(collection_format)
+          set_additional_properties, additional_properties = parse_additional_properties(definitions, value_type)
+          array_items[:additionalProperties] = additional_properties if set_additional_properties
+
+          array_items
+        end
+
+        def document_additional_properties(definitions, settings)
+          set_additional_properties, additional_properties = parse_additional_properties(definitions, settings)
+          @parsed_param[:additionalProperties] = additional_properties if set_additional_properties
+        end
+
+        def parse_additional_properties(definitions, settings)
+          return false unless settings.key?(:additionalProperties) || settings.key?(:additional_properties)
+
+          value =
+            if settings.key?(:additionalProperties)
+              GrapeSwagger::Errors::SwaggerSpecDeprecated.tell!(:additionalProperties)
+              settings[:additionalProperties]
+            else
+              settings[:additional_properties]
+            end
+
+          parsed_value =
+            if definitions[value.to_s]
+              { '$ref': "#/definitions/#{value}" }
+            elsif value.is_a?(Class)
+              { type: DataType.call(value) }
+            else
+              value
+            end
+
+          [true, parsed_value]
+        end
+
+        def document_example(settings)
+          example = settings[:example]
+          @parsed_param[:example] = example if example
         end
 
         def param_type(value_type)
@@ -110,8 +163,10 @@ module GrapeSwagger
             parse_enum_or_range_values(values.call) if values.parameters.empty?
           when Range
             parse_range_values(values) if values.first.is_a?(Integer)
+          when Array
+            { enum: values }
           else
-            { enum: values } if values
+            { enum: [values] } if values
           end
         end
 

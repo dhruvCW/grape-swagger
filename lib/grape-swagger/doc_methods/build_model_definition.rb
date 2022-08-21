@@ -4,48 +4,63 @@ module GrapeSwagger
   module DocMethods
     class BuildModelDefinition
       class << self
-        def build(model, properties, required)
-          definition = { type: 'object', properties: properties }
-
-          if required.nil?
-            required_attrs = required_attributes(model)
-            definition[:required] = required_attrs unless required_attrs.blank?
-          end
+        def build(_model, properties, required, other_def_properties = {})
+          definition = { type: 'object', properties: properties }.merge(other_def_properties)
 
           definition[:required] = required if required.is_a?(Array) && required.any?
 
           definition
         end
 
-        private
+        def parse_params_from_model(parsed_response, model, model_name)
+          if parsed_response.is_a?(Hash) && parsed_response.keys.first == :allOf
+            refs_or_models = parsed_response[:allOf]
+            parsed = parse_refs_and_models(refs_or_models, model)
 
-        def required_attributes(model)
-          parse_entity(model) || parse_representable(model)
+            {
+              allOf: parsed
+            }
+          else
+            properties, required = parsed_response
+            unless properties&.any?
+              raise GrapeSwagger::Errors::SwaggerSpec,
+                    "Empty model #{model_name}, swagger 2.0 doesn't support empty definitions."
+            end
+            properties, other_def_properties = parse_properties(properties)
+
+            build(
+              model, properties, required, other_def_properties
+            )
+          end
         end
 
-        def parse_entity(model)
-          return unless model.respond_to?(:documentation)
+        def parse_properties(properties)
+          other_properties = {}
 
-          deprecated_workflow_for('grape-swagger-entity')
+          discriminator_key, discriminator_value =
+            properties.find do |_key, value|
+              value[:documentation].try(:[], :is_discriminator)
+            end
 
-          model.documentation
-               .select { |_name, options| options[:required] }
-               .map { |name, options| options[:as] || name }
+          if discriminator_key
+            discriminator_value.delete(:documentation)
+            properties[discriminator_key] = discriminator_value
+
+            other_properties[:discriminator] = discriminator_key
+          end
+
+          [properties, other_properties]
         end
 
-        def parse_representable(model)
-          return unless model.respond_to?(:map)
-
-          deprecated_workflow_for('grape-swagger-representable')
-
-          model.map
-               .select { |p| p[:documentation] && p[:documentation][:required] }
-               .map(&:name)
-        end
-
-        def deprecated_workflow_for(gem_name)
-          warn "DEPRECATED: You are using old #{gem_name} version, which doesn't provide " \
-            "required attributes. To solve this problem, please update #{gem_name}"
+        def parse_refs_and_models(refs_or_models, model)
+          refs_or_models.map do |ref_or_models|
+            if ref_or_models.is_a?(Hash) && ref_or_models.keys.first == '$ref'
+              ref_or_models
+            else
+              properties, required = ref_or_models
+              GrapeSwagger::DocMethods::BuildModelDefinition.build(model, properties, required)
+            end
+          end
         end
       end
     end
